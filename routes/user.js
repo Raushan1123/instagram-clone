@@ -1,45 +1,97 @@
-const express = require('express');
-const userRouter = express.Router();
-const multer = require('multer');
+const express = require('express')
+const router = express.Router()
+const mongoose = require('mongoose')
+const requireLogin  = require('../middleware/requireLogin')
+const Post =  mongoose.model("Post")
+const User = mongoose.model("User")
 
-const {
-  retrieveUser,
-  retrievePosts,
-  bookmarkPost,
-  followUser,
-  retrieveFollowing,
-  retrieveFollowers,
-  searchUsers,
-  confirmUser,
-  changeAvatar,
-  removeAvatar,
-  updateProfile,
-  retrieveSuggestedUsers,
-} = require('../controllers/userController');
-const { requireAuth, optionalAuth } = require('../controllers/authController');
 
-userRouter.get('/suggested/:max?', requireAuth, retrieveSuggestedUsers);
-userRouter.get('/:username', optionalAuth, retrieveUser);
-userRouter.get('/:username/posts/:offset', retrievePosts);
-userRouter.get('/:userId/:offset/following', requireAuth, retrieveFollowing);
-userRouter.get('/:userId/:offset/followers', requireAuth, retrieveFollowers);
-userRouter.get('/:username/:offset/search', searchUsers);
+router.get('/user/:id',requireLogin,(req,res)=>{
+    User.findOne({_id:req.params.id})
+    .select("-password")
+    .then(user=>{
+         Post.find({postedBy:req.params.id})
+         .populate("postedBy","_id name")
+         .exec((err,posts)=>{
+             if(err){
+                 return res.status(422).json({error:err})
+             }
+             res.json({user,posts})
+         })
+    }).catch(err=>{
+        return res.status(404).json({error:"User not found"})
+    })
+})
 
-userRouter.put('/confirm', requireAuth, confirmUser);
-userRouter.put(
-  '/avatar',
-  requireAuth,
-  multer({
-    dest: 'temp/',
-    limits: { fieldSize: 8 * 1024 * 1024, fileSize: 1000000 },
-  }).single('image'),
-  changeAvatar
-);
-userRouter.put('/', requireAuth, updateProfile);
 
-userRouter.delete('/avatar', requireAuth, removeAvatar);
+router.put('/follow',requireLogin,(req,res)=>{
+    User.findByIdAndUpdate(req.body.followId,{
+        $push:{followers:req.user._id}
+    },{
+        new:true
+    },(err,result)=>{
+        if(err){
+            return res.status(422).json({error:err})
+        }
+      User.findByIdAndUpdate(req.user._id,{
+          $push:{following:req.body.followId}
+          
+      },{new:true}).select("-password").then(result=>{
+          res.json(result)
+      }).catch(err=>{
+          return res.status(422).json({error:err})
+      })
 
-userRouter.post('/:postId/bookmark', requireAuth, bookmarkPost);
-userRouter.post('/:userId/follow', requireAuth, followUser);
+    }
+    )
+})
+router.put('/unfollow',requireLogin,(req,res)=>{
+    User.findByIdAndUpdate(req.body.unfollowId,{
+        $pull:{followers:req.user._id}
+    },{
+        new:true
+    },(err,result)=>{
+        if(err){
+            return res.status(422).json({error:err})
+        }
+      User.findByIdAndUpdate(req.user._id,{
+          $pull:{following:req.body.unfollowId}
+          
+      },{new:true}).select("-password").then(result=>{
+          res.json(result)
+      }).catch(err=>{
+          return res.status(422).json({error:err})
+      })
 
-module.exports = userRouter;
+    }
+    )
+})
+
+
+router.put('/updatepic',requireLogin,(req,res)=>{
+    User.findByIdAndUpdate(req.user._id,{$set:{pic:req.body.pic}},{new:true},
+        (err,result)=>{
+         if(err){
+             return res.status(422).json({error:"pic canot post"})
+         }
+         res.json(result)
+    })
+})
+
+
+
+router.post('/search-users',(req,res)=>{
+    let userPattern = new RegExp("^"+req.body.query)
+    User.find({email:{$regex:userPattern}})
+    .select("_id email")
+    .then(user=>{
+        res.json({user})
+    }).catch(err=>{
+        console.log(err)
+    })
+
+})
+
+
+
+module.exports = router
